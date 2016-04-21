@@ -15018,6 +15018,261 @@ cr.shaders["colorblend"] = {src: ["varying mediump vec2 vTex;",
 	parameters: [] }
 ;
 ;
+cr.plugins_.AJAX = function(runtime)
+{
+	this.runtime = runtime;
+};
+(function ()
+{
+	var isNWjs = false;
+	var path = null;
+	var fs = null;
+	var nw_appfolder = "";
+	var pluginProto = cr.plugins_.AJAX.prototype;
+	pluginProto.Type = function(plugin)
+	{
+		this.plugin = plugin;
+		this.runtime = plugin.runtime;
+	};
+	var typeProto = pluginProto.Type.prototype;
+	typeProto.onCreate = function()
+	{
+	};
+	pluginProto.Instance = function(type)
+	{
+		this.type = type;
+		this.runtime = type.runtime;
+		this.lastData = "";
+		this.curTag = "";
+		this.progress = 0;
+		this.timeout = -1;
+		isNWjs = this.runtime.isNWjs;
+		if (isNWjs)
+		{
+			path = require("path");
+			fs = require("fs");
+			var process = window["process"] || nw["process"];
+			nw_appfolder = path["dirname"](process["execPath"]) + "\\";
+		}
+	};
+	var instanceProto = pluginProto.Instance.prototype;
+	var theInstance = null;
+	window["C2_AJAX_DCSide"] = function (event_, tag_, param_)
+	{
+		if (!theInstance)
+			return;
+		if (event_ === "success")
+		{
+			theInstance.curTag = tag_;
+			theInstance.lastData = param_;
+			theInstance.runtime.trigger(cr.plugins_.AJAX.prototype.cnds.OnComplete, theInstance);
+		}
+		else if (event_ === "error")
+		{
+			theInstance.curTag = tag_;
+			theInstance.runtime.trigger(cr.plugins_.AJAX.prototype.cnds.OnError, theInstance);
+		}
+		else if (event_ === "progress")
+		{
+			theInstance.progress = param_;
+			theInstance.curTag = tag_;
+			theInstance.runtime.trigger(cr.plugins_.AJAX.prototype.cnds.OnProgress, theInstance);
+		}
+	};
+	instanceProto.onCreate = function()
+	{
+		theInstance = this;
+	};
+	instanceProto.saveToJSON = function ()
+	{
+		return { "lastData": this.lastData };
+	};
+	instanceProto.loadFromJSON = function (o)
+	{
+		this.lastData = o["lastData"];
+		this.curTag = "";
+		this.progress = 0;
+	};
+	var next_request_headers = {};
+	var next_override_mime = "";
+	instanceProto.doRequest = function (tag_, url_, method_, data_)
+	{
+		if (this.runtime.isDirectCanvas)
+		{
+			AppMobi["webview"]["execute"]('C2_AJAX_WebSide("' + tag_ + '", "' + url_ + '", "' + method_ + '", ' + (data_ ? '"' + data_ + '"' : "null") + ');');
+			return;
+		}
+		var self = this;
+		var request = null;
+		var doErrorFunc = function ()
+		{
+			self.curTag = tag_;
+			self.runtime.trigger(cr.plugins_.AJAX.prototype.cnds.OnError, self);
+		};
+		var errorFunc = function ()
+		{
+			if (isNWjs)
+			{
+				var filepath = nw_appfolder + url_;
+				if (fs["existsSync"](filepath))
+				{
+					fs["readFile"](filepath, {"encoding": "utf8"}, function (err, data) {
+						if (err)
+						{
+							doErrorFunc();
+							return;
+						}
+						self.lastData = data.replace(/\r\n/g, "\n")
+						self.runtime.trigger(cr.plugins_.AJAX.prototype.cnds.OnComplete, self);
+					});
+				}
+				else
+					doErrorFunc();
+			}
+			else
+				doErrorFunc();
+		};
+		var progressFunc = function (e)
+		{
+			if (!e["lengthComputable"])
+				return;
+			self.progress = e.loaded / e.total;
+			self.curTag = tag_;
+			self.runtime.trigger(cr.plugins_.AJAX.prototype.cnds.OnProgress, self);
+		};
+		try
+		{
+			if (this.runtime.isWindowsPhone8)
+				request = new ActiveXObject("Microsoft.XMLHTTP");
+			else
+				request = new XMLHttpRequest();
+			request.onreadystatechange = function()
+			{
+				if (request.readyState === 4)
+				{
+					self.curTag = tag_;
+					if (request.responseText)
+						self.lastData = request.responseText.replace(/\r\n/g, "\n");		// fix windows style line endings
+					else
+						self.lastData = "";
+					if (request.status >= 400)
+						self.runtime.trigger(cr.plugins_.AJAX.prototype.cnds.OnError, self);
+					else
+					{
+						if ((!isNWjs || self.lastData.length) && !(!isNWjs && request.status === 0 && !self.lastData.length))
+							self.runtime.trigger(cr.plugins_.AJAX.prototype.cnds.OnComplete, self);
+					}
+				}
+			};
+			if (!this.runtime.isWindowsPhone8)
+			{
+				request.onerror = errorFunc;
+				request.ontimeout = errorFunc;
+				request.onabort = errorFunc;
+				request["onprogress"] = progressFunc;
+			}
+			request.open(method_, url_);
+			if (!this.runtime.isWindowsPhone8)
+			{
+				if (this.timeout >= 0 && typeof request["timeout"] !== "undefined")
+					request["timeout"] = this.timeout;
+			}
+			try {
+				request.responseType = "text";
+			} catch (e) {}
+			if (data_)
+			{
+				if (request["setRequestHeader"] && !next_request_headers.hasOwnProperty("Content-Type"))
+				{
+					request["setRequestHeader"]("Content-Type", "application/x-www-form-urlencoded");
+				}
+			}
+			if (request["setRequestHeader"])
+			{
+				var p;
+				for (p in next_request_headers)
+				{
+					if (next_request_headers.hasOwnProperty(p))
+					{
+						try {
+							request["setRequestHeader"](p, next_request_headers[p]);
+						}
+						catch (e) {}
+					}
+				}
+				next_request_headers = {};
+			}
+			if (next_override_mime && request["overrideMimeType"])
+			{
+				try {
+					request["overrideMimeType"](next_override_mime);
+				}
+				catch (e) {}
+				next_override_mime = "";
+			}
+			if (data_)
+				request.send(data_);
+			else
+				request.send();
+		}
+		catch (e)
+		{
+			errorFunc();
+		}
+	};
+	function Cnds() {};
+	Cnds.prototype.OnComplete = function (tag)
+	{
+		return cr.equals_nocase(tag, this.curTag);
+	};
+	Cnds.prototype.OnError = function (tag)
+	{
+		return cr.equals_nocase(tag, this.curTag);
+	};
+	Cnds.prototype.OnProgress = function (tag)
+	{
+		return cr.equals_nocase(tag, this.curTag);
+	};
+	pluginProto.cnds = new Cnds();
+	function Acts() {};
+	Acts.prototype.Request = function (tag_, url_)
+	{
+		this.doRequest(tag_, url_, "GET");
+	};
+	Acts.prototype.RequestFile = function (tag_, file_)
+	{
+		this.doRequest(tag_, file_, "GET");
+	};
+	Acts.prototype.Post = function (tag_, url_, data_, method_)
+	{
+		this.doRequest(tag_, url_, method_, data_);
+	};
+	Acts.prototype.SetTimeout = function (t)
+	{
+		this.timeout = t * 1000;
+	};
+	Acts.prototype.SetHeader = function (n, v)
+	{
+		next_request_headers[n] = v;
+	};
+	Acts.prototype.OverrideMIMEType = function (m)
+	{
+		next_override_mime = m;
+	};
+	pluginProto.acts = new Acts();
+	function Exps() {};
+	Exps.prototype.LastData = function (ret)
+	{
+		ret.set_string(this.lastData);
+	};
+	Exps.prototype.Progress = function (ret)
+	{
+		ret.set_float(this.progress);
+	};
+	pluginProto.exps = new Exps();
+}());
+;
+;
 cr.plugins_.Audio = function(runtime)
 {
 	this.runtime = runtime;
@@ -19136,6 +19391,158 @@ cr.plugins_.Button = function(runtime)
 }());
 ;
 ;
+cr.plugins_.C2WebSocket = function(runtime)
+{
+	this.runtime = runtime;
+};
+(function ()
+{
+	var pluginProto = cr.plugins_.C2WebSocket.prototype;
+	pluginProto.Type = function(plugin)
+	{
+		this.plugin = plugin;
+		this.runtime = plugin.runtime;
+	};
+	var typeProto = pluginProto.Type.prototype;
+	typeProto.onCreate = function()
+	{
+	};
+	pluginProto.Instance = function(type)
+	{
+		this.type = type;
+		this.runtime = type.runtime;
+	};
+	var instanceProto = pluginProto.Instance.prototype;
+	var isSupported = (typeof WebSocket !== "undefined");
+	var last_url = "";
+	instanceProto.onCreate = function()
+	{
+		this.ws = null;
+		this.messageText = "";
+		this.errorMsg = "";
+		this.closeCode = 0;
+		this.closeReason = "";
+	};
+	instanceProto.saveToJSON = function ()
+	{
+		return { "messageText": this.messageText, "errorMsg": this.errorMsg };
+	};
+	instanceProto.loadFromJSON = function (o)
+	{
+		this.messageText = o["messageText"];
+		this.errorMsg = o["errorMsg"];
+	};
+	function Cnds() {};
+	Cnds.prototype.OnOpened = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnClosed = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnError = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnMessage = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.IsOpen = function ()
+	{
+		return this.ws && this.ws.readyState === 1 /* OPEN */;
+	};
+	Cnds.prototype.IsConnecting = function ()
+	{
+		return this.ws && this.ws.readyState === 0 /* CONNECTING */;
+	};
+	Cnds.prototype.IsSupported = function ()
+	{
+		return isSupported;
+	};
+	pluginProto.cnds = new Cnds();
+	function Acts() {};
+	Acts.prototype.Connect = function (url_, requireProtocol_)
+	{
+		if (!isSupported)
+			return;
+		if (this.ws)
+			this.ws.close();
+		var self = this;
+		last_url = url_;
+		try {
+			if (requireProtocol_ === "")
+				this.ws = new WebSocket(url_);
+			else
+				this.ws = new WebSocket(url_, requireProtocol_);
+		}
+		catch (e) {
+			this.ws = null;
+			self.errorMsg = "Unable to create a WebSocket with the given address and protocol.";
+			self.runtime.trigger(cr.plugins_.C2WebSocket.prototype.cnds.OnError, self);
+			return;
+		}
+		this.ws.binaryType = "arraybuffer";
+		this.ws.onopen = function() {
+			if (requireProtocol_.length && self.ws.protocol.indexOf(requireProtocol_) === -1)
+			{
+				self.errorMsg = "WebSocket required protocol '" + requireProtocol_ + "' not supported by server";
+				self.runtime.trigger(cr.plugins_.C2WebSocket.prototype.cnds.OnError, self);
+			}
+			else
+				self.runtime.trigger(cr.plugins_.C2WebSocket.prototype.cnds.OnOpened, self);
+		};
+		this.ws.onerror = function (err_) {
+			if (cr.is_string(err_))
+				self.errorMsg = err_;
+			else
+				self.errorMsg = (err_ && cr.is_string(err_.data) ? err_.data : "");
+			self.runtime.trigger(cr.plugins_.C2WebSocket.prototype.cnds.OnError, self);
+		};
+		this.ws.onclose = function (e) {
+			self.closeCode = e["code"] || 0;
+			self.closeReason = e["reason"] || "";
+			self.runtime.trigger(cr.plugins_.C2WebSocket.prototype.cnds.OnClosed, self);
+		};
+		this.ws.onmessage = function (msg_) {
+			self.messageText = msg_.data || "";
+			self.runtime.trigger(cr.plugins_.C2WebSocket.prototype.cnds.OnMessage, self);
+		};
+	};
+	Acts.prototype.Close = function ()
+	{
+		if (this.ws)
+			this.ws.close();
+	};
+	Acts.prototype.Send = function (msg_)
+	{
+		if (!this.ws || this.ws.readyState !== 1 /* OPEN */)
+			return;
+		this.ws.send(msg_);
+	};
+	pluginProto.acts = new Acts();
+	function Exps() {};
+	Exps.prototype.MessageText = function (ret)
+	{
+		ret.set_string(this.messageText);
+	};
+	Exps.prototype.ErrorMsg = function (ret)
+	{
+		ret.set_string(cr.is_string(this.errorMsg) ? this.errorMsg : "");
+	};
+	Exps.prototype.CloseCode = function (ret)
+	{
+		ret.set_int(this.closeCode);
+	};
+	Exps.prototype.CloseReason = function (ret)
+	{
+		ret.set_string(this.closeReason);
+	};
+	pluginProto.exps = new Exps();
+}());
+;
+;
 cr.plugins_.Keyboard = function(runtime)
 {
 	this.runtime = runtime;
@@ -23222,14 +23629,16 @@ cr.behaviors.Sin = function(runtime)
 	behaviorProto.exps = new Exps();
 }());
 cr.getObjectRefTable = function () { return [
+	cr.plugins_.AJAX,
 	cr.plugins_.Audio,
-	cr.plugins_.Button,
 	cr.plugins_.Browser,
+	cr.plugins_.Button,
 	cr.plugins_.Keyboard,
 	cr.plugins_.Text,
-	cr.plugins_.Sprite,
 	cr.plugins_.Mouse,
+	cr.plugins_.Sprite,
 	cr.plugins_.TiledBg,
+	cr.plugins_.C2WebSocket,
 	cr.behaviors.Platform,
 	cr.behaviors.Rotate,
 	cr.behaviors.Anchor,
@@ -23271,9 +23680,10 @@ cr.getObjectRefTable = function () { return [
 	cr.plugins_.Sprite.prototype.acts.SetWidth,
 	cr.system_object.prototype.exps.time,
 	cr.plugins_.Sprite.prototype.acts.SetOpacity,
-	cr.plugins_.Button.prototype.cnds.OnClicked,
 	cr.plugins_.Text.prototype.acts.SetVisible,
 	cr.plugins_.Button.prototype.acts.SetText,
+	cr.plugins_.Button.prototype.cnds.OnClicked,
+	cr.plugins_.AJAX.prototype.acts.Request,
 	cr.plugins_.Mouse.prototype.cnds.OnObjectClicked,
 	cr.plugins_.Browser.prototype.acts.GoToURLWindow
 ];};
