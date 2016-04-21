@@ -23680,10 +23680,10 @@ cr.getObjectRefTable = function () { return [
 	cr.plugins_.Sprite.prototype.acts.SetWidth,
 	cr.system_object.prototype.exps.time,
 	cr.plugins_.Sprite.prototype.acts.SetOpacity,
+	cr.plugins_.AJAX.prototype.acts.Request,
 	cr.plugins_.Text.prototype.acts.SetVisible,
 	cr.plugins_.Button.prototype.acts.SetText,
 	cr.plugins_.Button.prototype.cnds.OnClicked,
-	cr.plugins_.AJAX.prototype.acts.Request,
 	cr.plugins_.Mouse.prototype.cnds.OnObjectClicked,
 	cr.plugins_.Browser.prototype.acts.GoToURLWindow
 ];};
