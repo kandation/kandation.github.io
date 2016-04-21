@@ -24063,6 +24063,301 @@ cr.plugins_.Touch = function(runtime)
 }());
 ;
 ;
+var stars=new Array();
+var x_speed=0;
+var y_speed=0;
+cr.plugins_.c2dstarfield = function(runtime)
+{
+	this.runtime = runtime;
+};
+(function ()
+{
+	var pluginProto = cr.plugins_.c2dstarfield.prototype;
+	pluginProto.Type = function(plugin)
+	{
+		this.plugin = plugin;
+		this.runtime = plugin.runtime;
+	};
+	var typeProto = pluginProto.Type.prototype;
+	typeProto.onCreate = function()
+	{
+	};
+	pluginProto.Instance = function(type)
+	{
+		this.type = type;
+		this.runtime = type.runtime;
+	};
+	var instanceProto = pluginProto.Instance.prototype;
+	var fxNames = [ "lighter",
+					"xor",
+					"copy",
+					"destination-over",
+					"source-in",
+					"destination-in",
+					"source-out",
+					"destination-out",
+					"source-atop",
+					"destination-atop"];
+	instanceProto.effectToCompositeOp = function(effect)
+	{
+		if (effect <= 0 || effect >= 11)
+			return "source-over";
+		return fxNames[effect - 1];	// not including "none" so offset by 1
+	};
+	instanceProto.updateBlend = function(effect)
+	{
+		var gl = this.runtime.gl;
+		if (!gl)
+			return;
+		this.srcBlend = gl.ONE;
+		this.destBlend = gl.ONE_MINUS_SRC_ALPHA;
+		switch (effect) {
+		case 1:		// lighter (additive)
+			this.srcBlend = gl.ONE;
+			this.destBlend = gl.ONE;
+			break;
+		case 2:		// xor
+			break;	// todo
+		case 3:		// copy
+			this.srcBlend = gl.ONE;
+			this.destBlend = gl.ZERO;
+			break;
+		case 4:		// destination-over
+			this.srcBlend = gl.ONE_MINUS_DST_ALPHA;
+			this.destBlend = gl.ONE;
+			break;
+		case 5:		// source-in
+			this.srcBlend = gl.DST_ALPHA;
+			this.destBlend = gl.ZERO;
+			break;
+		case 6:		// destination-in
+			this.srcBlend = gl.ZERO;
+			this.destBlend = gl.SRC_ALPHA;
+			break;
+		case 7:		// source-out
+			this.srcBlend = gl.ONE_MINUS_DST_ALPHA;
+			this.destBlend = gl.ZERO;
+			break;
+		case 8:		// destination-out
+			this.srcBlend = gl.ZERO;
+			this.destBlend = gl.ONE_MINUS_SRC_ALPHA;
+			break;
+		case 9:		// source-atop
+			this.srcBlend = gl.DST_ALPHA;
+			this.destBlend = gl.ONE_MINUS_SRC_ALPHA;
+			break;
+		case 10:	// destination-atop
+			this.srcBlend = gl.ONE_MINUS_DST_ALPHA;
+			this.destBlend = gl.SRC_ALPHA;
+			break;
+		}
+	};
+	instanceProto.onCreate = function()
+	{
+		this.visible = (this.properties[5] === 0);							// 0=visible, 1=invisible
+		this.compositeOp = this.effectToCompositeOp(this.properties[1]);
+		this.updateBlend(this.properties[0]);
+		this.canvas = document.createElement('canvas');
+		this.canvas.width=this.width;
+		this.canvas.height=this.height;
+		this.ctx = this.canvas.getContext('2d');
+		x_speed=(this.properties[1]);
+		y_speed=(this.properties[2]);
+		var nbrs    =(this.properties[3]);
+		var st_basecol=this.properties[4];
+		var c=st_basecol;
+		var v= c.split("(")[1].split(")")[0];
+	    v = v.split(",");
+		var b = v.map(function(x){
+		    x = parseInt(x).toString(16);      //Convert to a base16 string
+		return (x.length==1) ? "0"+x : x;  //Add zero if we get only one character
+		})
+		b = "#"+b.join("");
+		var my2dstarfield;
+		function ColorLuminance(hex, lum) {
+		hex = String(hex).replace(/[^0-9a-f]/gi, '');
+		if (hex.length < 6) {
+		hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+		}
+		lum = lum || 0;
+		var rgb = "#", c, i;
+		for (i = 0; i < 3; i++) {
+		c = parseInt(hex.substr(i*2,2), 16);
+		c = Math.round(Math.min(Math.max(0, c + (c * lum)), 255)).toString(16);
+		rgb += ("00"+c).substr(c.length);
+		}
+	   return rgb;
+}
+      var my2dstarsparams=[
+    	{nb:nbrs, speedy:1.0, speedx:1.0, color:ColorLuminance(b, 0.0), size:2},
+        {nb:nbrs, speedy:0.8, speedx:0.8, color:ColorLuminance(b, -0.2), size:2},
+        {nb:nbrs, speedy:0.6, speedx:0.6, color:ColorLuminance(b, -0.4), size:2},
+		{nb:nbrs, speedy:0.4, speedx:0.4, color:ColorLuminance(b, -0.6), size:2},
+        {nb:nbrs, speedy:0.2, speedx:0.2, color:ColorLuminance(b, -0.8), size:2},
+        ];
+        this.my2dstarfield=new starfield2D(this.canvas,my2dstarsparams);
+	  	this.runtime.tickMe(this);
+	};
+instanceProto.tick = function (){
+			var dt = this.runtime.getDt(this);
+			var ctx=this.ctx;
+			var w =this.canvas.width;
+			var h=this.canvas.height;
+			var xsp;
+		function draw(){
+		    ctx.fillRect(0, 0, w,h);
+			var slen=stars.length;
+		for(var i=0;i<slen;i++){
+			plot(stars[i].x,stars[i].y,stars[i].size,stars[i].color);
+			stars[i].x+=stars[i].speedx*x_speed;
+			stars[i].y+=stars[i].speedy*y_speed;
+			if(stars[i].x>w) stars[i].x=0;
+			if(stars[i].x<0) stars[i].x=w;
+			if(stars[i].y>h) stars[i].y=0;
+			if(stars[i].y<0) stars[i].y=h;
+		}
+	}
+	function plot (x,y,width,color)
+    {
+		var oldcolor = ctx.fillStyle;
+		ctx.globalAlpha=1.0;
+		ctx.fillStyle=color;
+		ctx.fillRect(x,y,width,2) ;
+		ctx.fillStyle=oldcolor;
+	}
+	    draw();
+		this.runtime.redraw = true;
+		this.update_tex = true;
+};
+	instanceProto.onDestroy = function ()
+	{
+	};
+	instanceProto.saveToJSON = function ()
+	{
+		return {
+            "canvas_w":this.canvas.width,
+            "canvas_h":this.canvas.height,
+            "image":this.ctx.getImageData(0,0,this.canvas.width,this.canvas.height).data
+		};
+	};
+	instanceProto.loadFromJSON = function (o)
+	{
+        var canvasWidth = this.canvas.width = o["canvas_w"];
+        var canvasHeight = this.canvas.height = o["canvas_h"];
+        var data = this.ctx.getImageData(0,0,this.canvas.width,this.canvas.height).data;
+        for (var y = 0; y < canvasHeight; ++y) {
+            for (var x = 0; x < canvasWidth; ++x) {
+                var index = (y * canvasWidth + x)*4;
+                for (var c = 0; c < 4; ++c)
+                data[index+c] = o["image"][index+c];
+            }
+        }
+	};
+	instanceProto.draw_instances = function (instances, ctx)
+    {
+        for(var x in instances)
+        {
+            if(instances[x].visible==false && this.runtime.testOverlap(this, instances[x])== false)
+                continue;
+            ctx.save();
+            ctx.scale(this.canvas.width/this.width, this.canvas.height/this.height);
+            ctx.rotate(-this.angle);
+            ctx.translate(-this.bquad.tlx, -this.bquad.tly);
+            ctx.globalCompositeOperation = instances[x].compositeOp;//rojo
+            if (instances[x].type.pattern !== undefined && instances[x].type.texture_img !== undefined) {
+                instances[x].pattern = ctx.createPattern(instances[x].type.texture_img, "repeat");
+            }
+            instances[x].draw(ctx);
+            ctx.restore();
+        }
+    };
+	instanceProto.draw = function(ctx)
+	{
+		ctx.save();
+		ctx.globalAlpha = this.opacity;
+		ctx.globalCompositeOperation = this.compositeOp;
+		var myx = this.x;
+		var myy = this.y;
+		if (this.runtime.pixel_rounding)
+		{
+			myx = Math.round(myx);
+			myy = Math.round(myy);
+		}
+		ctx.translate(myx, myy);
+		ctx.rotate(this.angle);
+		ctx.drawImage(this.canvas,
+						  0 - (this.hotspotX * this.width),
+						  0 - (this.hotspotY * this.height),
+						  this.width,
+						  this.height);
+		ctx.restore();
+	};
+	instanceProto.drawGL = function(glw)
+	{
+		glw.setBlend(this.srcBlend, this.destBlend);
+        if (this.update_tex)
+        {
+            if (this.tex)
+                glw.deleteTexture(this.tex);
+            this.tex=glw.loadTexture(this.canvas, false, this.runtime.linearSampling);
+            this.update_tex = false;
+        }
+		glw.setTexture(this.tex);
+		glw.setOpacity(this.opacity);
+		var q = this.bquad;
+		if (this.runtime.pixel_rounding)
+		{
+			var ox = Math.round(this.x) - this.x;
+			var oy = Math.round(this.y) - this.y;
+			glw.quad(q.tlx + ox, q.tly + oy, q.trx + ox, q.try_ + oy, q.brx + ox, q.bry + oy, q.blx + ox, q.bly + oy);
+		}
+		else
+			glw.quad(q.tlx, q.tly, q.trx, q.try_, q.brx, q.bry, q.blx, q.bly);
+	};
+	pluginProto.cnds = {};
+	var cnds = pluginProto.cnds;
+	function Acts() {};
+	pluginProto.acts = new Acts();
+	 Acts.prototype.SetEffect = function (effect)
+	 {
+		 this.compositeOp = this.effectToCompositeOp(effect);
+		 this.runtime.redraw = true;
+         this.update_tex = true;
+	 };
+	Acts.prototype.SetSpeed = function (spd)
+	{
+	x_speed=spd;
+	};
+	Acts.prototype.SetYSpeed = function (spd)
+	{
+	y_speed=spd;
+	};
+	pluginProto.exps = {};
+	var exps = pluginProto.exps;
+    exps.AsJSON = function(ret)
+    {
+        ret.set_string( JSON.stringify({
+			"c2array": true,
+			"size": [1, 1, this.canvas.width * this.canvas.height * 4],
+			"data": [[this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height).data]]
+		}));
+    };
+}());
+function starfield2D(dst,params){
+	this.dst=dst;
+	this.ctx=this.ctx;
+	this.stars=new Array();
+	var t=0;
+    var pr=params.length;
+	for(var i=0; i<pr; i++){
+		for(var j=0; j<params[i].nb; j++){
+			stars[t]={x:Math.random()*dst.width, y:Math.random()*dst.height, speedx:params[i].speedx, speedy:params[i].speedy, color:params[i].color, size:params[i].size};
+			t++;
+		}
+	}
+}
+;
+;
 cr.behaviors.Anchor = function(runtime)
 {
 	this.runtime = runtime;
@@ -28086,18 +28381,19 @@ cr.behaviors.Sin = function(runtime)
 	behaviorProto.exps = new Exps();
 }());
 cr.getObjectRefTable = function () { return [
-	cr.plugins_.Button,
-	cr.plugins_.Mouse,
-	cr.plugins_.Keyboard,
-	cr.plugins_.TiledBg,
-	cr.plugins_.Sprite,
-	cr.plugins_.Touch,
-	cr.plugins_.Text,
-	cr.plugins_.Spritefont2,
-	cr.plugins_.C2WebSocket,
-	cr.plugins_.AJAX,
-	cr.plugins_.Browser,
+	cr.plugins_.c2dstarfield,
 	cr.plugins_.Audio,
+	cr.plugins_.AJAX,
+	cr.plugins_.Button,
+	cr.plugins_.Browser,
+	cr.plugins_.Keyboard,
+	cr.plugins_.Mouse,
+	cr.plugins_.Sprite,
+	cr.plugins_.Text,
+	cr.plugins_.Touch,
+	cr.plugins_.Spritefont2,
+	cr.plugins_.TiledBg,
+	cr.plugins_.C2WebSocket,
 	cr.behaviors.Platform,
 	cr.behaviors.Physics,
 	cr.behaviors.Rotate,
@@ -28109,23 +28405,24 @@ cr.getObjectRefTable = function () { return [
 	cr.system_object.prototype.acts.SetVar,
 	cr.plugins_.Sprite.prototype.acts.SetPos,
 	cr.system_object.prototype.acts.Wait,
-	cr.plugins_.Audio.prototype.cnds.IsAnyPlaying,
 	cr.plugins_.Audio.prototype.acts.Play,
 	cr.system_object.prototype.cnds.EveryTick,
 	cr.plugins_.Text.prototype.acts.SetText,
 	cr.behaviors.Platform.prototype.acts.SetVectorY,
 	cr.system_object.prototype.acts.AddVar,
-	cr.plugins_.Touch.prototype.cnds.IsTouchingObject,
 	cr.plugins_.Mouse.prototype.cnds.IsButtonDown,
+	cr.system_object.prototype.cnds.CompareVar,
 	cr.plugins_.Sprite.prototype.acts.MoveForward,
 	cr.plugins_.Sprite.prototype.acts.SetEffectEnabled,
 	cr.plugins_.Sprite.prototype.acts.SetAnim,
-	cr.system_object.prototype.cnds.CompareVar,
 	cr.plugins_.Audio.prototype.acts.Stop,
 	cr.plugins_.Sprite.prototype.acts.RotateTowardPosition,
 	cr.plugins_.Sprite.prototype.exps.X,
 	cr.plugins_.Sprite.prototype.exps.Y,
 	cr.plugins_.Sprite.prototype.acts.RotateCounterclockwise,
+	cr.plugins_.Mouse.prototype.cnds.IsOverObject,
+	cr.plugins_.TiledBg.prototype.acts.SetVisible,
+	cr.plugins_.TiledBg.prototype.acts.MoveToTop,
 	cr.plugins_.Keyboard.prototype.cnds.IsKeyDown,
 	cr.plugins_.Sprite.prototype.acts.RotateClockwise,
 	cr.system_object.prototype.cnds.Every,
@@ -28157,6 +28454,7 @@ cr.getObjectRefTable = function () { return [
 	cr.plugins_.Button.prototype.cnds.OnClicked,
 	cr.plugins_.Mouse.prototype.cnds.OnObjectClicked,
 	cr.plugins_.Browser.prototype.acts.GoToURLWindow,
+	cr.plugins_.Button.prototype.cnds.IsChecked,
 	cr.plugins_.Keyboard.prototype.cnds.OnAnyKey,
 	cr.plugins_.Touch.prototype.cnds.IsInTouch
 ];};
